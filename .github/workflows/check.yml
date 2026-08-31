@@ -1,0 +1,110 @@
+name: Check insect-sale.com Last Updated
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: insect-sale-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch page and diff against stored state
+        id: check
+        run: |
+          set -e
+          PAGE=$(curl -sL --max-time 20 https://www.insect-sale.com/main.asp || true)
+          NEW=$(printf '%s' "$PAGE" | grep -oE 'Last Updated[[:space:]]*:[[:space:]]*[A-Za-z]+[[:space:]]*[0-9]{1,2}[[:space:]]*,[[:space:]]*[0-9]{4}' | head -1)
+          OLD=$(jq -r '.last_updated' state.json)
+          WAS_FAILING=$(jq -r '.fetch_failing' state.json)
+
+          echo "old=$OLD" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$NEW" ]; then
+            if [ "$WAS_FAILING" = "true" ]; then
+              echo "action=none" >> "$GITHUB_OUTPUT"
+            else
+              echo "action=alert_fetch_failed" >> "$GITHUB_OUTPUT"
+            fi
+          elif [ "$NEW" != "$OLD" ]; then
+            echo "action=alert_changed" >> "$GITHUB_OUTPUT"
+          elif [ "$WAS_FAILING" = "true" ]; then
+            echo "action=recovered" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=none" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Send change email
+        if: steps.check.outputs.action == 'alert_changed'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "insect-sale.com updated: ${{ steps.check.outputs.new }}"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: "Insect Sale Monitor"
+          body: |
+            The "Last Updated" date on insect-sale.com changed.
+
+            Old: ${{ steps.check.outputs.old }}
+            New: ${{ steps.check.outputs.new }}
+
+            Check it now: https://www.insect-sale.com/main.asp
+
+      - name: Send fetch-failure email
+        if: steps.check.outputs.action == 'alert_fetch_failed'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "insect-sale.com monitor: couldn't read the page"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: "Insect Sale Monitor"
+          body: |
+            The monitor could not find a "Last Updated" date on https://www.insect-sale.com/main.asp
+            (site may be down, or its page layout changed). It will keep checking silently
+            until the page is readable again.
+
+      - name: Update state (changed)
+        if: steps.check.outputs.action == 'alert_changed'
+        run: |
+          jq -n --arg d "${{ steps.check.outputs.new }}" '{last_updated: $d, fetch_failing: false}' > state.json
+          git config user.name "insect-sale-monitor-bot"
+          git config user.email "actions@github.com"
+          git add state.json
+          git commit -m "Last updated changed to ${{ steps.check.outputs.new }}"
+          git push
+
+      - name: Update state (fetch failing)
+        if: steps.check.outputs.action == 'alert_fetch_failed'
+        run: |
+          jq '.fetch_failing = true' state.json > state.json.tmp && mv state.json.tmp state.json
+          git config user.name "insect-sale-monitor-bot"
+          git config user.email "actions@github.com"
+          git add state.json
+          git commit -m "Mark fetch as failing"
+          git push
+
+      - name: Update state (recovered)
+        if: steps.check.outputs.action == 'recovered'
+        run: |
+          jq '.fetch_failing = false' state.json > state.json.tmp && mv state.json.tmp state.json
+          git config user.name "insect-sale-monitor-bot"
+          git config user.email "actions@github.com"
+          git add state.json
+          git commit -m "Fetch recovered"
+          git push
