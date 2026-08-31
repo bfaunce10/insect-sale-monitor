@@ -23,7 +23,7 @@ jobs:
         run: |
           set -e
           PAGE=$(curl -sL --max-time 20 https://www.insect-sale.com/main.asp | sed 's/&nbsp;/ /g' || true)
-          NEW=$(printf '%s' "$PAGE" | grep -oE 'Last Updated[[:space:]]*:[[:space:]]*[A-Za-z]+[[:space:]]*[0-9]{1,2}[[:space:]]*,[[:space:]]*[0-9]{4}' | head -1)
+          NEW=$(printf '%s' "$PAGE" | grep -oE 'Last Updated[[:space:]]*:[[:space:]]*[A-Za-z]+[[:space:]]*[0-9]{1,2}[[:space:]]*,[[:space:]]*[0-9]{4}' | head -1 | sed -E 's/^Last Updated[[:space:]]*:[[:space:]]*//')
           OLD=$(jq -r '.last_updated' state.json)
           WAS_FAILING=$(jq -r '.fetch_failing' state.json)
 
