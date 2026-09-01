@@ -44,40 +44,26 @@ jobs:
             echo "action=none" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Send change email
+      - name: Send change push notification
         if: steps.check.outputs.action == 'alert_changed'
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.GMAIL_USERNAME }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          subject: "insect-sale.com updated: ${{ steps.check.outputs.new }}"
-          to: ${{ secrets.NOTIFY_EMAIL }}
-          from: "Insect Sale Monitor"
-          body: |
-            The "Last Updated" date on insect-sale.com changed.
+        run: |
+          MSG=$(printf 'Old: %s\nNew: %s' "${{ steps.check.outputs.old }}" "${{ steps.check.outputs.new }}")
+          curl -sS \
+            -H "Title: insect-sale.com updated: ${{ steps.check.outputs.new }}" \
+            -H "Tags: bell" \
+            -H "Click: https://www.insect-sale.com/main.asp" \
+            -d "$MSG" \
+            "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}"
 
-            Old: ${{ steps.check.outputs.old }}
-            New: ${{ steps.check.outputs.new }}
-
-            Check it now: https://www.insect-sale.com/main.asp
-
-      - name: Send fetch-failure email
+      - name: Send fetch-failure push notification
         if: steps.check.outputs.action == 'alert_fetch_failed'
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.GMAIL_USERNAME }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          subject: "insect-sale.com monitor: couldn't read the page"
-          to: ${{ secrets.NOTIFY_EMAIL }}
-          from: "Insect Sale Monitor"
-          body: |
-            The monitor could not find a "Last Updated" date on https://www.insect-sale.com/main.asp
-            (site may be down, or its page layout changed). It will keep checking silently
-            until the page is readable again.
+        run: |
+          curl -sS \
+            -H "Title: insect-sale.com monitor: couldn't read the page" \
+            -H "Tags: warning" \
+            -H "Priority: low" \
+            -d "Site may be down, or its page layout changed. Will keep checking silently until it's readable again." \
+            "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}"
 
       - name: Update state (changed)
         if: steps.check.outputs.action == 'alert_changed'
